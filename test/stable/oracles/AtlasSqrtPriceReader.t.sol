@@ -6,6 +6,8 @@ import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IER
 import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {AtlasSqrtPriceReader} from "../../../src/stable/oracles/AtlasSqrtPriceReader.sol";
+import {AtlasPriceAdapter} from "../../../src/stable/oracles/adapters/AtlasPriceAdapter.sol";
+import {BasePriceAdapter} from "../../../src/stable/oracles/adapters/BasePriceAdapter.sol";
 import {AtlasPriceMath} from "../../../src/stable/oracles/libraries/AtlasPriceMath.sol";
 import {IMarketPriceResolverV3} from "../../../src/stable/oracles/interfaces/IMarketPriceResolverV3.sol";
 
@@ -102,7 +104,7 @@ contract AtlasSqrtPriceReaderTest is Test {
         vm.warp(1100);
         reader.read();
         vm.warp(1101);
-        vm.expectRevert(AtlasSqrtPriceReader.InvalidSnapshot.selector);
+        vm.expectRevert(AtlasPriceAdapter.InvalidSnapshot.selector);
         reader.read();
     }
 
@@ -112,7 +114,7 @@ contract AtlasSqrtPriceReaderTest is Test {
         uint64[4] memory expiry = [uint64(1100), 1100, 1100, 989];
         for (uint256 i; i < 4; ++i) {
             setSnapshot(epochs[i], observed[i], expiry[i], 200e8, 1e8);
-            vm.expectRevert(AtlasSqrtPriceReader.InvalidSnapshot.selector);
+            vm.expectRevert(AtlasPriceAdapter.InvalidSnapshot.selector);
             reader.read();
         }
     }
@@ -121,7 +123,7 @@ contract AtlasSqrtPriceReaderTest is Test {
         for (uint256 n; n < 4; ++n) {
             if (n == 2) continue;
             resolver.setSnapshot(7, 990, 1100, new uint64[](n));
-            vm.expectRevert(AtlasSqrtPriceReader.InvalidSnapshot.selector);
+            vm.expectRevert(AtlasPriceAdapter.InvalidSnapshot.selector);
             reader.read();
         }
     }
@@ -142,23 +144,23 @@ contract AtlasSqrtPriceReaderTest is Test {
     }
 
     function test_constructorRejectsMissingResolver() public {
-        vm.expectRevert(AtlasSqrtPriceReader.InvalidResolver.selector);
+        vm.expectRevert(AtlasPriceAdapter.InvalidResolver.selector);
         new AtlasSqrtPriceReader(IMarketPriceResolverV3(address(0)), TOKEN0, TOKEN1, FEED0, FEED1);
     }
 
     function test_constructorRejectsUnorderedOrNativeTokens() public {
-        vm.expectRevert(AtlasSqrtPriceReader.InvalidTokenOrder.selector);
+        vm.expectRevert(BasePriceAdapter.InvalidTokenOrder.selector);
         new AtlasSqrtPriceReader(resolver, TOKEN1, TOKEN0, FEED0, FEED1);
-        vm.expectRevert(AtlasSqrtPriceReader.InvalidTokenOrder.selector);
+        vm.expectRevert(BasePriceAdapter.InvalidTokenOrder.selector);
         new AtlasSqrtPriceReader(resolver, TOKEN0, TOKEN0, FEED0, FEED1);
-        vm.expectRevert(AtlasSqrtPriceReader.InvalidTokenOrder.selector);
+        vm.expectRevert(BasePriceAdapter.InvalidTokenOrder.selector);
         new AtlasSqrtPriceReader(resolver, address(0), TOKEN1, FEED0, FEED1);
     }
 
     function test_constructorRejectsEmptyFeeds() public {
-        vm.expectRevert(AtlasSqrtPriceReader.InvalidFeedId.selector);
+        vm.expectRevert(AtlasPriceAdapter.InvalidFeedId.selector);
         new AtlasSqrtPriceReader(resolver, TOKEN0, TOKEN1, bytes32(0), FEED1);
-        vm.expectRevert(AtlasSqrtPriceReader.InvalidFeedId.selector);
+        vm.expectRevert(AtlasPriceAdapter.InvalidFeedId.selector);
         new AtlasSqrtPriceReader(resolver, TOKEN0, TOKEN1, FEED0, bytes32(0));
     }
 
