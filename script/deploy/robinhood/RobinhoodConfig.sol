@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
+import {ProtocolFeeOracleStablePairHook} from "../../../src/stable/ProtocolFeeOracleStablePairHook.sol";
 import {Script} from "forge-std/Script.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {IAggregatorV3} from "../../../src/stable/oracles/interfaces/IAggregatorV3.sol";
@@ -18,6 +19,7 @@ abstract contract RobinhoodConfig is Script {
     address public constant USDG_FEED = 0x61B7e5650328764B076A108EFF5fa7282a1B9aD2;
 
     struct Policy {
+        ProtocolFeeOracleStablePairHook.ProtocolFeeConfig treasury;
         uint24 k;
         uint24 optimalFeeE6;
         uint8 targetMultiplier;
@@ -39,6 +41,14 @@ abstract contract RobinhoodConfig is Script {
     }
 
     function _policy() internal view returns (Policy memory p) {
+        uint256 share = vm.envUint("PROTOCOL_FEE_SHARE_BPS");
+        uint256 cap = vm.envUint("MAX_PROTOCOL_FEE_PIPS");
+        address recipient = vm.envAddress("PROTOCOL_FEE_RECIPIENT");
+        require(share <= 10_000 && cap < 1_000_000, "Invalid treasury policy");
+        require(
+            share == 0 || cap == 0 || (recipient != address(0) && recipient != MANAGER), "Treasury recipient required"
+        );
+        p.treasury = ProtocolFeeOracleStablePairHook.ProtocolFeeConfig(recipient, uint16(share), uint24(cap));
         uint256 k = vm.envUint("FEE_K");
         uint256 fee = vm.envUint("OPTIMAL_FEE_E6");
         uint256 target = vm.envUint("TARGET_MULTIPLIER");

@@ -75,9 +75,10 @@ tempo_mainnet = "https://rpc.tempo.xyz"
 [lint]
 lint_on_build=false
 
-# Narrow Robinhood build: same compiler pipeline as StablePair, without unrelated hook families.
+# Narrow Robinhood build. A size-conscious optimizer budget keeps the treasury variant below EIP-170.
 [profile.robinhood]
 src = "src/stable"
 test = "test/stable"
 script = "script/deploy/robinhood"
 solc = "0.8.26"
+optimizer_runs = 10000

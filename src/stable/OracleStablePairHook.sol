@@ -37,7 +37,7 @@ contract OracleStablePairHook is StablePairHook {
     /// @notice Atomically bind the reader and initialize at its current price.
     /// @dev The caller-supplied referenceSqrtPriceX96 field is ignored; k, optimalFee and targetMultiplier are used.
     function initializeOraclePool(PoolKey calldata key, StableFeeConfig memory config, SqrtPriceReader reader)
-        external
+        public
         onlyRole(POOL_INITIALIZER_ROLE)
         returns (int24)
     {

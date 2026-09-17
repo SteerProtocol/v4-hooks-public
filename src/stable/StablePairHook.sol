@@ -80,6 +80,7 @@ contract StablePairHook is BaseDynamicFeeHook, StableFeeConfiguration, IStablePa
     /// @return lpFeeOverride The calculated dynamic fee with override flag
     function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata)
         internal
+        virtual
         override
         returns (bytes4, BeforeSwapDelta, uint24)
     {

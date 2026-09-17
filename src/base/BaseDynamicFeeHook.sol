@@ -56,7 +56,7 @@ abstract contract BaseDynamicFeeHook is BaseUUPSHook, HookRoles, IDynamicFeeHook
     ///      future headroom (afterInitialize never runs today: initializePool self-calls, and v4
     ///      skips callbacks on self-calls). Remove-liquidity, return-delta, and donate flags stay
     ///      off so exits can never be blocked and amounts never altered.
-    function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
+    function getHookPermissions() public pure virtual override returns (Hooks.Permissions memory) {
         return Hooks.Permissions({
             beforeInitialize: true,
             afterInitialize: true,

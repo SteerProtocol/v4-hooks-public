@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
+import {ProtocolFeeClaims} from "../../../src/stable/ProtocolFeeClaims.sol";
 import {RobinhoodConfig} from "./RobinhoodConfig.sol";
 import {console2} from "forge-std/console2.sol";
-import {OracleStablePairHook} from "../../../src/stable/OracleStablePairHook.sol";
+import {ProtocolFeeOracleStablePairHook} from "../../../src/stable/ProtocolFeeOracleStablePairHook.sol";
 import {BaseDynamicFeeHook} from "../../../src/base/BaseDynamicFeeHook.sol";
 import {StableFeeConfig} from "../../../src/stable/interfaces/IStableFeeConfiguration.sol";
 import {RobinhoodPriceAdapter} from "../../../src/stable/oracles/adapters/RobinhoodPriceAdapter.sol";
@@ -28,11 +29,11 @@ contract DeployRobinhoodMarkets is RobinhoodConfig {
 
     uint160 internal constant FLAGS = Hooks.BEFORE_INITIALIZE_FLAG | Hooks.AFTER_INITIALIZE_FLAG
         | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.AFTER_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG
-        | Hooks.AFTER_SWAP_FLAG;
+        | Hooks.AFTER_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG;
 
     address internal broadcaster;
 
-    function run() external returns (OracleStablePairHook hook) {
+    function run() external returns (ProtocolFeeOracleStablePairHook hook) {
         // Foundry's ordinary EVM sees ArbSys as the RPC's INVALID-byte placeholder, not a
         // native precompile. Model its block-number response in the local simulation only.
         // vm.mockCall is a cheatcode and is never included in broadcast transactions.
@@ -61,21 +62,29 @@ contract DeployRobinhoodMarkets is RobinhoodConfig {
             console2.log("Preflight", m.symbol, uint256(reader.read().sqrtPriceX96));
         }
         hook = _deployHook(admin, configManager);
+        address claims = _deploy(
+            abi.encodePacked(type(ProtocolFeeClaims).creationCode, abi.encode(MANAGER)),
+            keccak256("Steer.ProtocolFeeClaims.v1"),
+            1_000_000
+        );
+        console2.log("ProtocolFeeClaims", claims);
         for (uint256 i = start; i < end; ++i) {
             _deployMarket(hook, markets[i], policy);
         }
-        console2.log("OracleStablePairHook", address(hook));
+        console2.log("ProtocolFeeOracleStablePairHook", address(hook));
         console2.log("Markets prepared", end - start);
     }
 
-    function _deployHook(address admin, address configManager) private returns (OracleStablePairHook hook) {
-        bytes memory implementationCode = abi.encodePacked(type(OracleStablePairHook).creationCode, abi.encode(MANAGER));
-        address implementation = _deploy(implementationCode, keccak256("Steer.OracleStablePairHook.v1"), 7_000_000);
+    function _deployHook(address admin, address configManager) private returns (ProtocolFeeOracleStablePairHook hook) {
+        bytes memory implementationCode =
+            abi.encodePacked(type(ProtocolFeeOracleStablePairHook).creationCode, abi.encode(MANAGER));
+        address implementation =
+            _deploy(implementationCode, keccak256("Steer.ProtocolFeeOracleStablePairHook.v1"), 7_000_000);
         bytes memory initialize = abi.encodeCall(BaseDynamicFeeHook.initialize, (admin, broadcaster, configManager));
         bytes memory proxyCode =
             abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(implementation, initialize));
         bytes32 salt = _mine(keccak256(proxyCode));
-        hook = OracleStablePairHook(_deploy(proxyCode, salt, 600_000));
+        hook = ProtocolFeeOracleStablePairHook(_deploy(proxyCode, salt, 600_000));
         require(
             address(uint160(uint256(vm.load(address(hook), ERC1967Utils.IMPLEMENTATION_SLOT)))) == implementation,
             "Implementation changed"
@@ -91,7 +100,7 @@ contract DeployRobinhoodMarkets is RobinhoodConfig {
         console2.logBytes32(salt);
     }
 
-    function _deployMarket(OracleStablePairHook hook, Market memory m, Policy memory p) private {
+    function _deployMarket(ProtocolFeeOracleStablePairHook hook, Market memory m, Policy memory p) private {
         bool stock0 = m.stock < USDG;
         address token0 = stock0 ? m.stock : USDG;
         address token1 = stock0 ? USDG : m.stock;
@@ -121,19 +130,24 @@ contract DeployRobinhoodMarkets is RobinhoodConfig {
         console2.log("Reader", address(reader));
     }
 
-    function _initializeMarket(OracleStablePairHook hook, PoolKey memory key, Policy memory p, SqrtPriceReader reader)
-        private
-    {
+    function _initializeMarket(
+        ProtocolFeeOracleStablePairHook hook,
+        PoolKey memory key,
+        Policy memory p,
+        SqrtPriceReader reader
+    ) private {
         PoolId id = key.toId();
         (uint24 k, uint24 fee, uint8 target, uint160 referencePrice) = hook.feeConfig(id);
         if (referencePrice == 0) {
             StableFeeConfig memory config = StableFeeConfig(p.k, p.optimalFeeE6, p.targetMultiplier, 0);
             vm.broadcast(broadcaster);
-            hook.initializeOraclePool{gas: 1_000_000}(key, config, reader);
+            hook.initializeOraclePoolWithProtocolFee{gas: 1_000_000}(key, config, reader, p.treasury);
         } else {
             require(k == p.k && fee == p.optimalFeeE6 && target == p.targetMultiplier, "Existing fee policy mismatch");
             require(address(hook.priceReader(id)) == address(reader), "Existing reader mismatch");
         }
+        ProtocolFeeOracleStablePairHook.ProtocolFeeConfig memory actual = hook.protocolFeeConfig(id);
+        require(keccak256(abi.encode(actual)) == keccak256(abi.encode(p.treasury)), "Existing treasury policy mismatch");
         (uint160 poolPrice,,,) = IPoolManager(MANAGER).getSlot0(id);
         require(poolPrice != 0 && address(hook.priceReader(id)) == address(reader), "Pool verification failed");
         hook.getFee(key);

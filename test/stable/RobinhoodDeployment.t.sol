@@ -3,7 +3,7 @@ pragma solidity ^0.8.26;
 
 import {Test} from "forge-std/Test.sol";
 import {DeployRobinhoodMarkets} from "../../script/deploy/robinhood/DeployRobinhoodMarkets.s.sol";
-import {OracleStablePairHook} from "../../src/stable/OracleStablePairHook.sol";
+import {ProtocolFeeOracleStablePairHook} from "../../src/stable/ProtocolFeeOracleStablePairHook.sol";
 import {RobinhoodPriceAdapter} from "../../src/stable/oracles/adapters/RobinhoodPriceAdapter.sol";
 import {ChainlinkPriceAdapter} from "../../src/stable/oracles/adapters/ChainlinkPriceAdapter.sol";
 import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
@@ -40,6 +40,9 @@ contract RobinhoodDeploymentTest is Test {
         vm.setEnv("DEPLOYER", vm.toString(DEPLOYER));
         vm.setEnv("HOOK_ADMIN", vm.toString(address(this)));
         vm.setEnv("CONFIG_MANAGER", vm.toString(address(this)));
+        vm.setEnv("PROTOCOL_FEE_SHARE_BPS", "1000");
+        vm.setEnv("MAX_PROTOCOL_FEE_PIPS", "100");
+        vm.setEnv("PROTOCOL_FEE_RECIPIENT", vm.toString(address(0xFEE)));
         vm.setEnv("FEE_K", "16609443");
         vm.setEnv("OPTIMAL_FEE_E6", "1000");
         vm.setEnv("TARGET_MULTIPLIER", "50");
@@ -88,9 +91,9 @@ contract RobinhoodDeploymentTest is Test {
     }
 
     function test_all35MarketsInitializeAndRerunIsIdempotent() public {
-        OracleStablePairHook hook = script.run();
+        ProtocolFeeOracleStablePairHook hook = script.run();
         uint64 nonce = vm.getNonce(DEPLOYER);
-        OracleStablePairHook again = script.run();
+        ProtocolFeeOracleStablePairHook again = script.run();
         assertEq(address(again), address(hook));
         assertEq(vm.getNonce(DEPLOYER), nonce, "rerun must not broadcast transactions");
         for (uint256 i; i < 35; ++i) {
@@ -108,7 +111,27 @@ contract RobinhoodDeploymentTest is Test {
             (uint24 zero, uint24 one) = hook.getFee(key);
             assertEq(zero, 1000);
             assertEq(one, 1000);
+            ProtocolFeeOracleStablePairHook.ProtocolFeeConfig memory c = hook.protocolFeeConfig(key.toId());
+            assertEq(c.recipient, address(0xFEE));
+            assertEq(c.protocolFeeShareBps, 1000);
+            assertEq(c.maxProtocolFeePips, 100);
         }
+    }
+
+    function test_rerunRejectsChangedTreasuryPolicy() public {
+        script.run();
+        vm.setEnv("PROTOCOL_FEE_SHARE_BPS", "2000");
+        vm.expectRevert("Existing treasury policy mismatch");
+        script.run();
+        vm.setEnv("PROTOCOL_FEE_SHARE_BPS", "1000");
+    }
+
+    function test_invalidTreasuryPolicyStopsBeforeBroadcast() public {
+        vm.setEnv("PROTOCOL_FEE_SHARE_BPS", "10001");
+        vm.expectRevert("Invalid treasury policy");
+        script.run();
+        vm.setEnv("PROTOCOL_FEE_SHARE_BPS", "1000");
+        assertEq(vm.getNonce(DEPLOYER), 0);
     }
 
     function test_wrongChainStopsBeforeDeployment() public {
