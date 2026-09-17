@@ -14,6 +14,8 @@ Each initialized PoolId has a separate `ProtocolFeeConfig`:
 
 Either rate field being zero disables collection. There is no implicit positive default. `CONFIG_MANAGER_ROLE` can change this configuration and the recipient independently per pool. Changes emit `ProtocolFeeConfigured` and do not reset the auction, change `optimalFeeE6`, or alter the reference-price band. Already-earned claims remain with their original recipient. The initializer can set both policies atomically using `initializeOraclePoolWithProtocolFee`; the inherited ordinary oracle initialization leaves treasury fees disabled.
 
+This treasury variant requires both pool tokens to expose at least 6 decimals. The requirement is enforced whenever a reader is first bound or replaced, including through inherited oracle initialization. Six decimals limits one raw token unit to one millionth of a token, but does not by itself bound that unit's economic value. The base oracle hook and adapter layer retain their broader decimal support.
+
 The role can change the share up to 100% and the cap up to 99.9999%; there is no additional immutable economic ceiling or timelock in this implementation. Treat the configured role as trusted. Existing upgrade authority is unchanged.
 
 ## Calculation and rounding
@@ -27,7 +29,7 @@ Choose `L >= (F - h) / (1 - h)`, rounding upward to a representable core fee. Tr
 
 With no native fee, a 1% auction fee and a 10% treasury share target a 0.1% treasury charge and approximately 0.900901% LP fee on the remaining input. These are sequential fees; simply subtracting 0.1 percentage points from the LP rate would be incorrect.
 
-The fraction collected never exceeds the configured share/cap. Integer pips can make collection smaller than the nominal share, including zero. Exact-input trades whose treasury amount rounds to zero retain the original LP fee and partial-fill behavior. Saturated 100% aggregate core fees are not split; core's existing exact-output restriction still applies. Uniswap's own protocol fee remains core-controlled and is composed into the calculation; its absolute proceeds can change because core processes input after the treasury deduction.
+The fraction collected never exceeds the configured share/cap. Integer pips can make collection smaller than the nominal share, including zero. Exact-input trades whose treasury amount rounds to zero retain the original LP fee and partial-fill behavior. A fee-bearing exact-output swap reverts with `ProtocolFeeBelowMinimum` when it consumes input but its treasury amount rounds to zero; this prevents the reduced LP fee from becoming an uncollected discount. Saturated 100% aggregate core fees are not split; core's existing exact-output restriction still applies. Uniswap's own protocol fee remains core-controlled and is composed into the calculation; its absolute proceeds can change because core processes input after the treasury deduction.
 
 The continuous-price economics match the original fee budget. Do not promise byte-for-byte quote equality: core rounds every swap step, and changing the LP rate changes those roundings. Exact-output input differences can be amplified when the aggregate fee approaches 100%. Always quote actual execution, particularly for tiny amounts, low-decimal tokens, tick crossings and high auction fees.
 
@@ -46,7 +48,7 @@ A quote/router integration can:
 
 This repository exposes and tests the error/retry flow; it does not modify an application router or deploy a quote service. Multi-hop routes must simulate the complete route. Do not catch all reverts as partial fills: stale/paused oracle failures and other errors must remain failures.
 
-Exact-output treasury fees use actual consumed input, including when core partially fills. A router promising an exact output must still enforce its own requested-output requirement. Zero-fee trades remain free of treasury charges. No liquidity-removal permissions are enabled.
+Exact-output treasury fees use actual consumed input, including when core partially fills. `ProtocolFeeBelowMinimum` is wrapped by PoolManager like other hook callback errors. A router promising an exact output must still enforce its own requested-output requirement and surface or handle that specific tiny-trade failure. Disabled collection and zero-fee trades remain free of treasury charges. No liquidity-removal permissions are enabled.
 
 ## Collection
 

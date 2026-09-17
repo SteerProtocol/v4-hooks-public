@@ -84,9 +84,13 @@ contract OracleStablePairHook is StablePairHook {
             address(reader).code.length == 0 || reader.token0() != Currency.unwrap(key.currency0)
                 || reader.token1() != Currency.unwrap(key.currency1)
         ) revert InvalidPriceReader();
+        _validateReaderTokens(key);
         _oracleStorage().readers[key.toId()] = reader;
         emit PriceReaderUpdated(key.toId(), address(reader));
     }
+
+    /// @dev Variant-specific token eligibility checks run whenever a reader is bound or replaced.
+    function _validateReaderTokens(PoolKey calldata) internal view virtual {}
 
     function _loadFeeContext(PoolId id) internal view override returns (FeeContext memory context) {
         context = super._loadFeeContext(id);

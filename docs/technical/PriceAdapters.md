@@ -90,7 +90,7 @@ ERC-7726 does not expose observation timestamps, expiry or update IDs. All three
 
 ## Numeric limits and validation
 
-Token and Chainlink-feed decimal counts are supported from 0 through 38; cached token decimals must not change. Inputs that cannot be represented as exact uint256 rational components after factor cancellation are rejected. No value is silently truncated to uint64. Native currency is unsupported; use wrapped ERC-20s.
+The adapter layer and base oracle hook support token and Chainlink-feed decimal counts from 0 through 38; cached token decimals must not change. `ProtocolFeeOracleStablePairHook` applies a narrower pool policy and requires both tokens to expose at least 6 decimals. Inputs that cannot be represented as exact uint256 rational components after factor cancellation are rejected. No value is silently truncated to uint64. Native currency is unsupported; use wrapped ERC-20s.
 
 `PriceRatioMath` handles full-width uint256 ratio components. It uses Q192 directly when possible, and an exact 320-bit quotient representation with integer Newton refinement for large ratios. Tests include independent Python integer vectors, 768-bit cross-multiplication checks, scaling cancellation, v4 boundaries, and the original Atlas regression properties.
 

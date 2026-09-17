@@ -118,6 +118,13 @@ contract RobinhoodDeploymentTest is Test {
         }
     }
 
+    function test_catalogMeetsProtocolFeeTokenDecimalFloor() public view {
+        assertGe(vm.parseJsonUint(catalog, ".quoteDecimals"), 6);
+        for (uint256 i; i < 35; ++i) {
+            assertGe(vm.parseJsonUint(catalog, string.concat(".markets[", vm.toString(i), "].stockDecimals")), 6);
+        }
+    }
+
     function test_rerunRejectsChangedTreasuryPolicy() public {
         script.run();
         vm.setEnv("PROTOCOL_FEE_SHARE_BPS", "2000");

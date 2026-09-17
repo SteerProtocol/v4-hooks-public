@@ -47,6 +47,8 @@ contract ProtocolFeeOracleStablePairHook is OracleStablePairHook {
     error MissingSwapContext();
     error PartialExactInput(uint256 requestedInput, uint256 executableInput);
     error InvalidInputDelta();
+    error ProtocolFeeBelowMinimum();
+    error UnsupportedTokenDecimals();
 
     event ProtocolFeeConfigured(PoolId indexed poolId, address indexed recipient, uint16 shareBps, uint24 capPips);
     event ProtocolFeeAccrued(
@@ -80,6 +82,27 @@ contract ProtocolFeeOracleStablePairHook is OracleStablePairHook {
 
     function protocolFeeConfig(PoolId id) public view returns (ProtocolFeeConfig memory) {
         return _protocolStorage().configs[id];
+    }
+
+    /// @dev Six decimals keeps one raw unit at or below one millionth of a token for fee rounding.
+    function _validateReaderTokens(PoolKey calldata key) internal view override {
+        address token0 = Currency.unwrap(key.currency0);
+        address token1 = Currency.unwrap(key.currency1);
+        bool unsupported;
+        assembly ("memory-safe") {
+            mstore(0, shl(224, 0x313ce567))
+            let success0 := staticcall(gas(), token0, 0, 4, 0, 32)
+            let valid0 := and(success0, iszero(lt(returndatasize(), 32)))
+            let decimals0 := mload(0)
+            mstore(0, shl(224, 0x313ce567))
+            let success1 := staticcall(gas(), token1, 0, 4, 0, 32)
+            let valid1 := and(success1, iszero(lt(returndatasize(), 32)))
+            unsupported := or(
+                or(or(iszero(valid0), lt(decimals0, 6)), gt(decimals0, 255)),
+                or(or(iszero(valid1), lt(mload(0), 6)), gt(mload(0), 255))
+            )
+        }
+        if (unsupported) revert UnsupportedTokenDecimals();
     }
 
     /// @notice getFee retains its original meaning: the unsplit auction fee, excluding native Uniswap fees.
@@ -172,6 +195,9 @@ contract ProtocolFeeOracleStablePairHook is OracleStablePairHook {
             }
         } else {
             amount = ProtocolFeeSplit.exactOutput(poolInput, q);
+            if (poolInput != 0 && amount == 0 && q.totalSwapFeePips != q.poolSwapFeePips) {
+                revert ProtocolFeeBelowMinimum();
+            }
         }
         if (amount != 0) _accrue(key, params.zeroForOne, amount);
         return (IHooks.afterSwap.selector, exactInput ? int128(0) : amount.toInt128());

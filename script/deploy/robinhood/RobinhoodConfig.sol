@@ -17,6 +17,7 @@ abstract contract RobinhoodConfig is Script {
     address public constant MANAGER = 0x8366a39CC670B4001A1121B8F6A443A643e40951;
     address public constant USDG = 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168;
     address public constant USDG_FEED = 0x61B7e5650328764B076A108EFF5fa7282a1B9aD2;
+    uint256 internal constant MIN_TOKEN_DECIMALS = 6;
 
     struct Policy {
         ProtocolFeeOracleStablePairHook.ProtocolFeeConfig treasury;
@@ -81,7 +82,9 @@ abstract contract RobinhoodConfig is Script {
         require(vm.parseJsonAddress(json, ".poolManager") == MANAGER, "Manager mismatch");
         require(vm.parseJsonAddress(json, ".quoteToken") == USDG, "Quote token mismatch");
         require(vm.parseJsonAddress(json, ".quoteFeed") == USDG_FEED, "Quote feed mismatch");
-        require(IERC20Metadata(USDG).decimals() == vm.parseJsonUint(json, ".quoteDecimals"), "USDG decimals changed");
+        uint256 quoteDecimals = vm.parseJsonUint(json, ".quoteDecimals");
+        require(quoteDecimals >= MIN_TOKEN_DECIMALS && quoteDecimals <= 38, "Invalid quote decimals");
+        require(IERC20Metadata(USDG).decimals() == quoteDecimals, "USDG decimals changed");
         _checkFeed(
             USDG_FEED, vm.parseJsonUint(json, ".quoteFeedDecimals"), vm.parseJsonString(json, ".quoteDescription")
         );
@@ -96,7 +99,9 @@ abstract contract RobinhoodConfig is Script {
             m.feed = vm.parseJsonAddress(json, string.concat(root, ".stockFeed"));
             uint256 stockDecimals = vm.parseJsonUint(json, string.concat(root, ".stockDecimals"));
             uint256 feedDecimals = vm.parseJsonUint(json, string.concat(root, ".stockFeedDecimals"));
-            require(stockDecimals <= 38 && feedDecimals <= 38, "Invalid decimals");
+            require(
+                stockDecimals >= MIN_TOKEN_DECIMALS && stockDecimals <= 38 && feedDecimals <= 38, "Invalid decimals"
+            );
             m.stockDecimals = uint8(stockDecimals);
             m.feedDecimals = uint8(feedDecimals);
             m.description = vm.parseJsonString(json, string.concat(root, ".stockDescription"));
