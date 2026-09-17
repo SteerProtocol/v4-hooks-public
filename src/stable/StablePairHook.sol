@@ -23,6 +23,11 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 ///      not take the pool's protocolFee into account if it's turned on.
 /// @custom:security-contact security@uniswap.org
 contract StablePairHook is BaseDynamicFeeHook, StableFeeConfiguration, IStablePairHook {
+    struct FeeContext {
+        StableFeeConfig config;
+        StableFeeState state;
+    }
+
     using LPFeeLibrary for uint24;
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
@@ -31,8 +36,9 @@ contract StablePairHook is BaseDynamicFeeHook, StableFeeConfiguration, IStablePa
     constructor(IPoolManager _manager) BaseDynamicFeeHook(_manager) {}
 
     /// @inheritdoc IStablePairHook
-    function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96, StableFeeConfig calldata feeConfig)
-        external
+    function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96, StableFeeConfig memory feeConfig)
+        public
+        virtual
         onlyRole(POOL_INITIALIZER_ROLE)
         returns (int24 tick)
     {
@@ -54,11 +60,12 @@ contract StablePairHook is BaseDynamicFeeHook, StableFeeConfiguration, IStablePa
         PoolId poolId = key.toId();
         _checkPoolInitialized(poolId);
 
-        (uint256 sqrtAmmPriceX96, bool isNewBlock) = _loadPrice(poolId);
+        FeeContext memory context = _loadFeeContext(poolId);
+        (uint256 sqrtAmmPriceX96, bool isNewBlock) = _loadPrice(poolId, context.state);
 
         // Compute each direction from the same start-of-block state the next swap would see
-        (uint256 feeE12ZeroForOne,) = _getFee(poolId, sqrtAmmPriceX96, isNewBlock, true);
-        (uint256 feeE12OneForZero,) = _getFee(poolId, sqrtAmmPriceX96, isNewBlock, false);
+        (uint256 feeE12ZeroForOne,) = _getFee(context, sqrtAmmPriceX96, isNewBlock, true);
+        (uint256 feeE12OneForZero,) = _getFee(context, sqrtAmmPriceX96, isNewBlock, false);
 
         // Uniswap v4 handles fees in E6 not E12
         feeE6ZeroForOne = StableFeeCalculation.toFeeE6(feeE12ZeroForOne);
@@ -78,11 +85,14 @@ contract StablePairHook is BaseDynamicFeeHook, StableFeeConfiguration, IStablePa
     {
         PoolId poolId = key.toId();
 
-        (uint256 sqrtAmmPriceX96, bool isNewBlock) = _loadPrice(poolId);
+        FeeContext memory context = _loadFeeContext(poolId);
+        (uint256 sqrtAmmPriceX96, bool isNewBlock) = _loadPrice(poolId, context.state);
 
-        (uint256 lpFeeE12, uint256 decayingFeeE12) = _getFee(poolId, sqrtAmmPriceX96, isNewBlock, params.zeroForOne);
+        (uint256 lpFeeE12, uint256 decayingFeeE12) = _getFee(context, sqrtAmmPriceX96, isNewBlock, params.zeroForOne);
 
-        // Only update feeState on the first swap of a new block
+        _persistReference(poolId, context.config.referenceSqrtPriceX96);
+
+        // Update on the first swap of a new block or after a reference/configuration reset
         if (isNewBlock) {
             StableFeeState storage poolFeeState = _getStableFeeConfigurationStorage().feeState[poolId];
             poolFeeState.decayingFeeE12 = uint40(decayingFeeE12);
@@ -98,12 +108,24 @@ contract StablePairHook is BaseDynamicFeeHook, StableFeeConfiguration, IStablePa
         );
     }
 
+    /// @dev Extension point shared by fee previews and swaps. Static pools use the stored state.
+    function _loadFeeContext(PoolId poolId) internal view virtual returns (FeeContext memory context) {
+        context.config = _getStableFeeConfigurationStorage().feeConfig[poolId];
+        context.state = _getStableFeeConfigurationStorage().feeState[poolId];
+    }
+
+    /// @dev Oracle variants persist the reference represented by the context after calculating the fee.
+    function _persistReference(PoolId, uint160) internal virtual {}
+
     /// @notice Select the AMM price used for fee calculation and whether this is a new block.
     /// @param poolId The PoolId of the pool
     /// @return sqrtAmmPriceX96 The (potentially cached) AMM sqrt price to compute the fee from
     /// @return isNewBlock True if this is the first swap of a new block (or after init/reset)
-    function _loadPrice(PoolId poolId) private view returns (uint256 sqrtAmmPriceX96, bool isNewBlock) {
-        StableFeeState storage poolFeeState = _getStableFeeConfigurationStorage().feeState[poolId];
+    function _loadPrice(PoolId poolId, StableFeeState memory poolFeeState)
+        private
+        view
+        returns (uint256 sqrtAmmPriceX96, bool isNewBlock)
+    {
         // Use start of block price for fee calculation to prevent swap splitting advantage, or read fresh price if first swap after pool init/reset.
         // Tradeoff: cached price becomes stale within a block, but impact is minimal for stable pools.
         // Accepted: with zero active liquidity the price moves for free, so the cache can sit on the opposite side of
@@ -117,18 +139,18 @@ contract StablePairHook is BaseDynamicFeeHook, StableFeeConfiguration, IStablePa
     }
 
     /// @notice Calculate the LP fee for one swap direction, plus the decaying fee to persist.
-    /// @param poolId The PoolId of the pool
+    /// @param context The configuration and fee state for this calculation
     /// @param sqrtAmmPriceX96 The AMM sqrt price to compute the fee from (from _loadPrice)
     /// @param isNewBlock Whether this is the first swap of a new block (from _loadPrice)
     /// @param zeroForOne The swap direction
     /// @return lpFeeE12 The lp fee for this swap in 1e12 precision
     /// @return decayingFeeE12 The decaying fee to persist for this block (UNDEFINED inside optimal range)
-    function _getFee(PoolId poolId, uint256 sqrtAmmPriceX96, bool isNewBlock, bool zeroForOne)
+    function _getFee(FeeContext memory context, uint256 sqrtAmmPriceX96, bool isNewBlock, bool zeroForOne)
         private
         view
         returns (uint256 lpFeeE12, uint256 decayingFeeE12)
     {
-        StableFeeConfig storage poolFeeConfig = _getStableFeeConfigurationStorage().feeConfig[poolId];
+        StableFeeConfig memory poolFeeConfig = context.config;
         uint256 sqrtReferencePriceX96 = poolFeeConfig.referenceSqrtPriceX96;
         uint256 optimalFeeE6 = poolFeeConfig.optimalFeeE6;
 
@@ -162,7 +184,7 @@ contract StablePairHook is BaseDynamicFeeHook, StableFeeConfiguration, IStablePa
             decayingFeeE12 = StableFeeCalculation.UNDEFINED_DECAYING_FEE_E12; // No decaying fee inside optimal range
         } else {
             // Outside optimal range: The fee is calculated such that the fee decays exponentially toward a target fee
-            StableFeeState storage poolFeeState = _getStableFeeConfigurationStorage().feeState[poolId];
+            StableFeeState memory poolFeeState = context.state;
             if (isNewBlock) {
                 // farBoundaryFeeE12 represents the fee to reach whichever boundary is farther from the current AMM price.
                 uint256 farBoundaryFeeE12 = StableFeeCalculation.calculateFarBoundaryFee(priceRatioX96, optimalFeeE6);
@@ -198,8 +220,8 @@ contract StablePairHook is BaseDynamicFeeHook, StableFeeConfiguration, IStablePa
     /// @param ammPriceBelowRP True if current AMM price < reference price
     /// @return decayingFeeE12 The calculated decaying fee in 1e12 precision
     function _calculateDecayingFee(
-        StableFeeConfig storage poolFeeConfig,
-        StableFeeState storage poolFeeState,
+        StableFeeConfig memory poolFeeConfig,
+        StableFeeState memory poolFeeState,
         uint256 sqrtAmmPriceX96,
         uint256 sqrtReferencePriceX96,
         uint256 closeBoundaryFeeE12,

@@ -12,7 +12,7 @@ Atlas resolver / Chainlink feeds / ERC-7726 quote oracle
                reference sqrtPriceX96
 ```
 
-This is a standalone reader layer. StablePair's fee rules, swap callbacks, reference updates, and reset behavior are unchanged. No contracts or feed configurations have been deployed.
+The reader layer can be used independently or by `OracleStablePairHook`, which binds a reader per pool and refreshes its reference during fee calculation. The original `StablePairHook` retains static-reference behavior. See [Robinhood deployment](RobinhoodDeployment.md) for the oracle-backed variant, reset policy and stock/USDG catalog. No contracts have been deployed by this work.
 
 ## Common interface
 
@@ -39,7 +39,7 @@ The common interface is deliberately a rational price rather than an eight-decim
 
 `updateId` is an opaque, source-local identity. A changed identity does not imply a changed price, and IDs are not ordered or comparable across adapters. Both timestamps zero means unavailable metadata. The reader never substitutes the current block time for a missing observation time. With nonzero metadata it rejects future, malformed, or expired timestamps. The adapter remains responsible for its own source's validity guarantees.
 
-Use a new adapter/reader deployment to change an immutable feed configuration or provider. A future hook integration must select and authorize its reader separately; this change adds no mutable provider registry or automatic fallback.
+Use a new adapter/reader deployment to change an immutable feed configuration or provider. `OracleStablePairHook` authorizes reader replacement through `CONFIG_MANAGER_ROLE` and has no automatic fallback.
 
 ## AtlasPriceAdapter
 
@@ -74,6 +74,10 @@ If configured, the sequencer guard rejects downtime, missing/future recovery tim
 
 References: [AggregatorV3 API](https://docs.chain.link/data-feeds/api-reference), [sequencer uptime guidance](https://docs.chain.link/data-feeds/l2-sequencer-feeds).
 
+## RobinhoodPriceAdapter
+
+Extends the Chainlink adapter with `stock0` and `stock1` flags. Each flagged token must expose `oraclePaused()`; a paused token or a failed call rejects the read. At least one stock flag is required. Official Robinhood feeds already contain the corporate-action multiplier, so the adapter does not apply it again. See [Robinhood deployment](RobinhoodDeployment.md) for verified coverage and freshness limitations.
+
 ## ERC7726PriceAdapter
 
 Constructor: oracle, token0, token1, baseAmount.
@@ -98,4 +102,4 @@ FOUNDRY_SCRIPT=src/stable/oracles FOUNDRY_FFI=false \
 forge test --use 0.8.26 -vv
 ```
 
-The local validation used the same source/test files and compiler settings through an isolated Foundry root to avoid installing unrelated submodules. The 39 tests include 8,192 fuzz cases. Provider behavior is tested with mocks implementing the production ABIs; no live oracle availability, deployment, or end-to-end swap integration is claimed.
+The local validation used the same source/test files and compiler settings through an isolated Foundry root to avoid installing unrelated submodules. The original 39 adapter/math tests include 8,192 fuzz cases. The broader StablePair suite now includes oracle-hook and Robinhood deployment tests. Provider behavior in local tests uses mocks implementing production ABIs; live catalog checks and fork-rehearsal limits are documented in the Robinhood deployment guide.

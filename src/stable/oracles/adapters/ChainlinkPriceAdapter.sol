@@ -58,7 +58,7 @@ contract ChainlinkPriceAdapter is BasePriceAdapter {
         sequencerGracePeriod = config.sequencerGracePeriod;
     }
 
-    function readPrice() external view override returns (Price memory result) {
+    function readPrice() public view virtual override returns (Price memory result) {
         _checkSequencer();
         FeedPrice memory p0 = _readFeed(feed0, maxAge0);
         FeedPrice memory p1 = _readFeed(feed1, maxAge1);

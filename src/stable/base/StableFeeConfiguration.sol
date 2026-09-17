@@ -86,7 +86,7 @@ abstract contract StableFeeConfiguration is HookRoles, BlockNumberish, IStableFe
     /// @notice Internal helper to validate, reset state, and store fee config
     /// @param _poolId The pool ID to initialize
     /// @param _feeConfig The fee config to validate and store
-    function _updateFeeConfig(PoolId _poolId, StableFeeConfig calldata _feeConfig) internal {
+    function _updateFeeConfig(PoolId _poolId, StableFeeConfig memory _feeConfig) internal {
         _validateK(_feeConfig.k);
         _validateOptimalFeeE6(_feeConfig.optimalFeeE6);
         _validateTargetMultiplier(_feeConfig.targetMultiplier);
